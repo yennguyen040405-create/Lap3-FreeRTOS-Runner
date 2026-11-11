@@ -1,0 +1,515 @@
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Runner Monitoring System</title>
+
+    <!-- Thu vien MQTT va Chart.js -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f1f5f9;
+            margin: 0;
+            padding: 25px;
+            color: #1e293b;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: #1d4ed8;
+        }
+
+        .status {
+            text-align: center;
+            margin: 15px;
+            font-weight: bold;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+        }
+
+        .card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 2px 8px #0001;
+        }
+
+        .value {
+            font-size: 30px;
+            font-weight: bold;
+            color: #2563eb;
+        }
+
+        .panel {
+            background: white;
+            padding: 20px;
+            margin-top: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px #0001;
+        }
+
+        /* KHU VUC BIEU DO */
+        .charts {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .chart-box {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px #0001;
+            min-width: 0;
+        }
+
+        .chart-box h2 {
+            text-align: center;
+            font-size: 19px;
+            color: #1e293b;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 280px;
+            width: 100%;
+        }
+
+        button {
+            padding: 10px 16px;
+            margin: 5px;
+            border: none;
+            border-radius: 6px;
+            background: #2563eb;
+            color: white;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #1e40af;
+        }
+
+        .bad {
+            color: #dc2626;
+            font-weight: bold;
+        }
+
+        .ok {
+            color: #16a34a;
+            font-weight: bold;
+        }
+
+        @media (max-width: 700px) {
+            .cards {
+                grid-template-columns: 1fr;
+            }
+
+            .charts {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+<div class="container">
+
+    <h1>RUNNER MONITORING SYSTEM</h1>
+
+    <p style="text-align:center">
+        Hệ thống giám sát nhiệt độ, áp suất và độ cao
+    </p>
+
+    <p class="status" id="connection">
+        Đang kết nối MQTT...
+    </p>
+
+    <p class="status" id="lastdata"
+       style="font-weight:normal;color:#64748b">
+        Chưa nhận dữ liệu từ ESP32
+    </p>
+
+    <h2>Dữ liệu cảm biến BMP180</h2>
+
+    <div class="cards">
+
+        <div class="card">
+            <h3>Nhiệt độ</h3>
+            <p class="value" id="temp">-- °C</p>
+        </div>
+
+        <div class="card">
+            <h3>Áp suất</h3>
+            <p class="value" id="press">-- hPa</p>
+        </div>
+
+        <div class="card">
+            <h3>Độ cao</h3>
+            <p class="value" id="alt">-- m</p>
+        </div>
+
+    </div>
+
+    <!-- BIEU DO NHIET DO VA DO CAO -->
+    <h2 style="margin-top:30px">Biểu đồ theo thời gian thực</h2>
+
+    <div class="charts">
+
+        <div class="chart-box">
+            <h2>Biểu đồ nhiệt độ (°C)</h2>
+            <div class="chart-container">
+                <canvas id="tempChart"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-box">
+            <h2>Biểu đồ độ cao (m)</h2>
+            <div class="chart-container">
+                <canvas id="altChart"></canvas>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="panel">
+        <h2>Trạng thái thiết bị</h2>
+
+        <p>LED: <span id="led">OFF</span></p>
+        <p>Buzzer: <span id="buzzer">OFF</span></p>
+        <p>Chế độ: <span id="mode">AUTO</span></p>
+        <p>Cảnh báo: <span id="alert" class="ok">NORMAL</span></p>
+    </div>
+
+    <div class="panel">
+        <h2>Điều khiển thiết bị</h2>
+
+        <p style="color:#64748b;font-size:14px">
+            Nút LED và Buzzer hoạt động ở chế độ MANUAL.
+        </p>
+
+        <button onclick="sendCommand('led', 'ON')">
+            Bật LED
+        </button>
+
+        <button onclick="sendCommand('led', 'OFF')">
+            Tắt LED
+        </button>
+
+        <br>
+
+        <button onclick="sendCommand('buzzer', 'ON')">
+            Bật còi
+        </button>
+
+        <button onclick="sendCommand('buzzer', 'OFF')">
+            Tắt còi
+        </button>
+
+        <br>
+
+        <button onclick="sendCommand('mode', 'AUTO')">
+            Chế độ tự động
+        </button>
+
+        <button onclick="sendCommand('mode', 'MANUAL')">
+            Chế độ thủ công
+        </button>
+    </div>
+
+</div>
+
+<script>
+
+// ===== CAU HINH MQTT =====
+
+const TOPIC_BASE = "lab3/runner/nguyenyen_dhtd22/data";
+
+const T_DATA = TOPIC_BASE + "/data";
+const T_CMD_LED = TOPIC_BASE + "/cmd/led";
+const T_CMD_BUZ = TOPIC_BASE + "/cmd/buzzer";
+const T_CMD_MODE = TOPIC_BASE + "/cmd/mode";
+
+// ===== KHOI TAO BIEU DO NHIET DO =====
+
+const tempChart = new Chart(
+    document.getElementById("tempChart"),
+    {
+        type: "line",
+        data: {
+            labels: [],
+            datasets: [{
+                label: "Nhiệt độ (°C)",
+                data: [],
+                borderColor: "#ef4444",
+                backgroundColor: "rgba(239,68,68,0.12)",
+                borderWidth: 2,
+                pointRadius: 3,
+                tension: 0.3,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: "Thời gian"
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: "Nhiệt độ (°C)"
+                    }
+                }
+            }
+        }
+    }
+);
+
+// ===== KHOI TAO BIEU DO DO CAO =====
+
+const altChart = new Chart(
+    document.getElementById("altChart"),
+    {
+        type: "line",
+        data: {
+            labels: [],
+            datasets: [{
+                label: "Độ cao (m)",
+                data: [],
+                borderColor: "#2563eb",
+                backgroundColor: "rgba(37,99,235,0.12)",
+                borderWidth: 2,
+                pointRadius: 3,
+                tension: 0.3,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: "Thời gian"
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: "Độ cao (m)"
+                    }
+                }
+            }
+        }
+    }
+);
+
+// ===== CAP NHAT DU LIEU BIEU DO =====
+
+function updateCharts(temp, alt) {
+
+    const time = new Date().toLocaleTimeString();
+
+    // Them du lieu nhiet do
+    tempChart.data.labels.push(time);
+    tempChart.data.datasets[0].data.push(temp);
+
+    // Them du lieu do cao
+    altChart.data.labels.push(time);
+    altChart.data.datasets[0].data.push(alt);
+
+    // Chi hien thi 20 mau gan nhat
+    if (tempChart.data.labels.length > 20) {
+        tempChart.data.labels.shift();
+        tempChart.data.datasets[0].data.shift();
+
+        altChart.data.labels.shift();
+        altChart.data.datasets[0].data.shift();
+    }
+
+    tempChart.update();
+    altChart.update();
+}
+
+// ===== KET NOI MQTT =====
+
+const client = mqtt.connect(
+    "wss://broker.emqx.io:8084/mqtt",
+    {
+        clientId: "runner_dashboard_" +
+            Math.random().toString(16).substring(2),
+        clean: true,
+        connectTimeout: 10000,
+        reconnectPeriod: 2000
+    }
+);
+
+// ===== KET NOI MQTT =====
+
+client.on("connect", function () {
+
+    document.getElementById("connection").textContent =
+        "Đã kết nối MQTT Broker";
+
+    document.getElementById("connection").className =
+        "status ok";
+
+    console.log("MQTT đã kết nối!");
+
+    client.subscribe(T_DATA, function (err) {
+
+        if (err) {
+            console.log("Lỗi đăng ký topic:", err);
+        } else {
+            console.log("Đã đăng ký topic:", T_DATA);
+        }
+
+    });
+
+});
+
+// ===== NHAN DU LIEU TU ESP32 =====
+
+client.on("message", function (topic, message) {
+
+    console.log("NHẬN:", topic, message.toString());
+
+    if (topic !== T_DATA) return;
+
+    try {
+
+        const data = JSON.parse(message.toString());
+
+        const temp = Number(data.temp);
+        const press = Number(data.press);
+        const alt = Number(data.alt);
+
+        document.getElementById("temp").textContent =
+            temp.toFixed(2) + " °C";
+
+        document.getElementById("press").textContent =
+            press.toFixed(2) + " hPa";
+
+        document.getElementById("alt").textContent =
+            alt.toFixed(2) + " m";
+
+        // CAP NHAT HAI BIEU DO
+        if (Number.isFinite(temp) && Number.isFinite(alt)) {
+            updateCharts(temp, alt);
+        }
+
+        document.getElementById("led").textContent =
+            data.led ? "ON" : "OFF";
+
+        document.getElementById("buzzer").textContent =
+            data.buzzer ? "ON" : "OFF";
+
+        document.getElementById("mode").textContent =
+            data.mode;
+
+        const alertElement =
+            document.getElementById("alert");
+
+        alertElement.textContent = data.alert;
+
+        alertElement.className =
+            data.alert === "NORMAL" ? "ok" : "bad";
+
+        document.getElementById("lastdata").textContent =
+            "Cập nhật lúc " +
+            new Date().toLocaleTimeString();
+
+    } catch (error) {
+
+        console.log("Lỗi đọc JSON:", error);
+
+    }
+
+});
+
+// ===== BAO LOI KET NOI =====
+
+client.on("error", function (error) {
+
+    console.log("Lỗi MQTT:", error);
+
+    document.getElementById("connection").textContent =
+        "Lỗi kết nối MQTT";
+
+    document.getElementById("connection").className =
+        "status bad";
+
+});
+
+client.on("offline", function () {
+
+    document.getElementById("connection").textContent =
+        "MQTT đang mất kết nối...";
+
+    document.getElementById("connection").className =
+        "status bad";
+
+});
+
+// ===== GUI LENH DIEU KHIEN =====
+
+function sendCommand(type, value) {
+
+    if (!client.connected) {
+
+        alert("Website chưa kết nối MQTT!");
+
+        return;
+    }
+
+    let topic;
+
+    if (type === "led") {
+        topic = T_CMD_LED;
+    }
+    else if (type === "buzzer") {
+        topic = T_CMD_BUZ;
+    }
+    else if (type === "mode") {
+        topic = T_CMD_MODE;
+    }
+
+    client.publish(topic, value, function (err) {
+
+        if (err) {
+            alert("Gửi lệnh thất bại!");
+        } else {
+            console.log("Đã gửi:", topic, value);
+        }
+
+    });
+
+}
+
+</script>
+
+</body>
+</html>
